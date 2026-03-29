@@ -16,6 +16,7 @@
     "vue-tsc": "^3.2.6"
   },
   "dependencies": {
+    "flatgeobuf": "^4.4.0",
     "vue": "^3.5.31"
   }
 }
