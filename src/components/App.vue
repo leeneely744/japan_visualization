@@ -1,3 +1,106 @@
+<script lang="ts">
+import { geojson } from 'flatgeobuf';
+import type { Feature, FeatureCollection } from 'geojson';
+import { Deck } from '@deck.gl/core';
+import {GeoJsonLayer} from '@deck.gl/layers';
+
+// ─────────────────────────────────────────────
+//  FlatGeobuf を読み込み GeoJSON に変換
+// ─────────────────────────────────────────────
+async function loadFGB(
+  url: string,
+  onProgress?: (count: number) => void,
+): Promise<FeatureCollection> {
+  const res = await fetch(url);
+  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+  const features: Feature[] = [];
+  let loaded = 0;
+
+  for await (const feature of geojson.deserialize(res.body) as AsyncGenerator<Feature>) {
+    features.push(feature);
+    loaded++;
+    onProgress?.(loaded);
+  }
+
+  return { type: 'FeatureCollection', features };
+}
+
+// ─────────────────────────────────────────────
+//  deck.gl 初期化
+// ─────────────────────────────────────────────
+const deckgl = new Deck({
+  initialViewState: {
+    longitude: 137.0,
+    latitude:  36.5,
+    zoom:       5.0,
+    pitch:      0,
+    bearing:    0,
+  },
+  controller: true,
+  layers: [],
+  onHover: ({ object, x, y }) => {
+    const tip = document.getElementById('tooltip')!;
+    if (!object) {
+      tip.style.display = 'none';
+      return;
+    }
+    const p = object.properties || {};
+    // プロパティ名は FGB の中身に依存するため、あるものを全部表示
+    const name = p.N03_001 || p.name || p.pref_name || p.prefecture || Object.values(p)[0] || '—';
+    tip.style.display = 'block';
+    tip.style.left = (x + 14) + 'px';
+    tip.style.top  = (y + 14) + 'px';
+    tip.innerHTML = `<div class="tt-name">${name}</div>`;
+  },
+});
+
+// ─────────────────────────────────────────────
+//  データ読み込み → レイヤー生成
+// ─────────────────────────────────────────────
+const loadingBar = document.getElementById('loading-bar')!;
+
+loadFGB('/geo/neatogeo_prefectures.fgb', (count) => {
+  // 47都道府県を基準に進捗表示
+  loadingBar.style.width = Math.min(count / 47 * 100, 95) + '%';
+})
+.then(geojson => {
+  document.getElementById('stat-count')!.innerHTML =
+    `${geojson.features.length}<span>都道府県</span>`;
+
+  // 最初の feature のプロパティをコンソールで確認
+  console.log('[FGB] first feature properties:', geojson.features[0]?.properties);
+
+  const layer = new GeoJsonLayer({
+    id: 'prefectures',
+    data: geojson,
+    filled: true,
+    stroked: true,
+    getFillColor: [20, 50, 80, 60],
+    getLineColor: [0, 229, 255, 200],
+    getLineWidth: 800,         // メートル単位
+    lineWidthMinPixels: 1,
+    lineWidthMaxPixels: 3,
+    pickable: true,
+    autoHighlight: true,
+    highlightColor: [0, 229, 255, 60],
+  });
+
+  deckgl.setProps({ layers: [layer] });
+
+  loadingBar.style.width = '100%';
+  setTimeout(() => {
+    document.getElementById('loading')!.classList.add('hidden');
+  }, 400);
+})
+.catch(err => {
+  console.error('[FGB] 読み込みエラー:', err);
+  document.getElementById('loading')!.innerHTML =
+    `<div class="loading-title" style="color:#ff6b35">読み込みに失敗しました</div>
+     <div style="font-family:var(--font-mono);font-size:12px;color:var(--muted);margin-top:12px">${err.message}</div>`;
+});
+</script>
+
 <template>
   <!-- Loading screen -->
   <div id="loading">
