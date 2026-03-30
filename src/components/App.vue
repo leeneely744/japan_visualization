@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { geojson } from 'flatgeobuf';
 import type { Feature, FeatureCollection } from 'geojson';
 import { Deck } from '@deck.gl/core';
@@ -89,8 +89,14 @@ function buildLayer(data: FeatureCollection): GeoJsonLayer {
   });
 }
 
+let deckgl: Deck | null = null;
+
+onUnmounted(() => {
+  deckgl?.finalize();
+});
+
 onMounted(async () => {
-  const deckgl = initDeck();
+  deckgl = initDeck();
   try {
     const data = await loadFGB('/geo/neatogeo_prefectures.fgb', (count) => {
       loadingProgress.value = Math.min(count / 47 * 100, 95);
