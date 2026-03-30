@@ -1,9 +1,22 @@
 <script setup lang="ts">
-import { onMounted } from 'vue';
+import { ref, onMounted } from 'vue';
 import { geojson } from 'flatgeobuf';
 import type { Feature, FeatureCollection } from 'geojson';
 import { Deck } from '@deck.gl/core';
 import { GeoJsonLayer } from '@deck.gl/layers';
+
+// ─────────────────────────────────────────────
+//  リアクティブな状態
+// ─────────────────────────────────────────────
+const loadingProgress = ref(0);
+const loadingHidden = ref(false);
+const errorMessage = ref('');
+const featureCount = ref(0);
+
+const tooltipVisible = ref(false);
+const tooltipX = ref(0);
+const tooltipY = ref(0);
+const tooltipName = ref('');
 
 // ─────────────────────────────────────────────
 //  FlatGeobuf を読み込み GeoJSON に変換
@@ -27,11 +40,11 @@ async function loadFGB(
   return { type: 'FeatureCollection', features };
 }
 
-onMounted(() => {
-  // ─────────────────────────────────────────────
-  //  deck.gl 初期化
-  // ─────────────────────────────────────────────
-  const deckgl = new Deck({
+// ─────────────────────────────────────────────
+//  deck.gl 初期化
+// ─────────────────────────────────────────────
+function initDeck(): Deck {
+  return new Deck({
     initialViewState: {
       longitude: 137.0,
       latitude:  36.5,
@@ -42,75 +55,74 @@ onMounted(() => {
     controller: true,
     layers: [],
     onHover: ({ object, x, y }) => {
-      const tip = document.getElementById('tooltip')!;
       if (!object) {
-        tip.style.display = 'none';
+        tooltipVisible.value = false;
         return;
       }
       const p = object.properties || {};
       // プロパティ名は FGB の中身に依存するため、あるものを全部表示
-      const name = p.N03_001 || p.name || p.pref_name || p.prefecture || Object.values(p)[0] || '—';
-      tip.style.display = 'block';
-      tip.style.left = (x + 14) + 'px';
-      tip.style.top  = (y + 14) + 'px';
-      tip.innerHTML = `<div class="tt-name">${name}</div>`;
+      tooltipName.value = p.N03_001 || p.name || p.pref_name || p.prefecture || Object.values(p)[0] || '—';
+      tooltipX.value = x + 14;
+      tooltipY.value = y + 14;
+      tooltipVisible.value = true;
     },
   });
+}
 
-  // ─────────────────────────────────────────────
-  //  データ読み込み → レイヤー生成
-  // ─────────────────────────────────────────────
-  const loadingBar = document.getElementById('loading-bar')!;
+// ─────────────────────────────────────────────
+//  GeoJSON レイヤー生成
+// ─────────────────────────────────────────────
+function buildLayer(data: FeatureCollection): GeoJsonLayer {
+  return new GeoJsonLayer({
+    id: 'prefectures',
+    data,
+    filled: true,
+    stroked: true,
+    getFillColor: [20, 50, 80, 60],
+    getLineColor: [0, 229, 255, 200],
+    getLineWidth: 800,         // メートル単位
+    lineWidthMinPixels: 1,
+    lineWidthMaxPixels: 3,
+    pickable: true,
+    autoHighlight: true,
+    highlightColor: [0, 229, 255, 60],
+  });
+}
 
-  loadFGB('/geo/neatogeo_prefectures.fgb', (count) => {
-    // 47都道府県を基準に進捗表示
-    loadingBar.style.width = Math.min(count / 47 * 100, 95) + '%';
-  })
-  .then(geojsonData => {
-    document.getElementById('stat-count')!.innerHTML =
-      `${geojsonData.features.length}<span>都道府県</span>`;
-
-    // 最初の feature のプロパティをコンソールで確認
-    console.log('[FGB] first feature properties:', geojsonData.features[0]?.properties);
-
-    const layer = new GeoJsonLayer({
-      id: 'prefectures',
-      data: geojsonData,
-      filled: true,
-      stroked: true,
-      getFillColor: [20, 50, 80, 60],
-      getLineColor: [0, 229, 255, 200],
-      getLineWidth: 800,         // メートル単位
-      lineWidthMinPixels: 1,
-      lineWidthMaxPixels: 3,
-      pickable: true,
-      autoHighlight: true,
-      highlightColor: [0, 229, 255, 60],
+onMounted(async () => {
+  const deckgl = initDeck();
+  try {
+    const data = await loadFGB('/geo/neatogeo_prefectures.fgb', (count) => {
+      loadingProgress.value = Math.min(count / 47 * 100, 95);
     });
 
-    deckgl.setProps({ layers: [layer] });
+    featureCount.value = data.features.length;
+    console.log('[FGB] first feature properties:', data.features[0]?.properties);
 
-    loadingBar.style.width = '100%';
-    setTimeout(() => {
-      document.getElementById('loading')!.classList.add('hidden');
-    }, 400);
-  })
-  .catch(err => {
+    deckgl.setProps({ layers: [buildLayer(data)] });
+
+    loadingProgress.value = 100;
+    setTimeout(() => { loadingHidden.value = true; }, 400);
+  } catch (err) {
     console.error('[FGB] 読み込みエラー:', err);
-    document.getElementById('loading')!.innerHTML =
-      `<div class="loading-title" style="color:#ff6b35">読み込みに失敗しました</div>
-       <div style="font-family:var(--font-mono);font-size:12px;color:var(--muted);margin-top:12px">${err.message}</div>`;
-  });
+    errorMessage.value = (err as Error).message;
+  }
 });
 </script>
 
 <template>
   <!-- Loading screen -->
-  <div id="loading">
-    <div class="loading-title">Japan Data Viz</div>
-    <div class="loading-bar-wrap">
-      <div class="loading-bar" id="loading-bar"></div>
-    </div>
+  <div id="loading" :class="{ hidden: loadingHidden }">
+    <template v-if="errorMessage">
+      <div class="loading-title" style="color:#ff6b35">読み込みに失敗しました</div>
+      <div class="error-detail">{{ errorMessage }}</div>
+    </template>
+    <template v-else>
+      <div class="loading-title">Japan Data Viz</div>
+      <div class="loading-bar-wrap">
+        <div class="loading-bar" :style="{ width: loadingProgress + '%' }"></div>
+      </div>
+    </template>
   </div>
 
   <!-- Map -->
@@ -127,51 +139,26 @@ onMounted(() => {
   <div id="stats">
     <div class="stat-card">
       <div class="stat-label">都道府県数</div>
-      <div class="stat-value" id="stat-count">—</div>
+      <div class="stat-value">
+        {{ featureCount > 0 ? featureCount : '—' }}<span v-if="featureCount > 0">都道府県</span>
+      </div>
     </div>
   </div>
 
   <!-- Tooltip -->
-  <div id="tooltip"></div>
+  <div
+    id="tooltip"
+    v-show="tooltipVisible"
+    :style="{ left: tooltipX + 'px', top: tooltipY + 'px' }"
+  >
+    <div class="tt-name">{{ tooltipName }}</div>
+  </div>
 </template>
 
-<style>
-*,
-*::before,
-*::after {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-}
-
-:root {
-    --bg: #080c10;
-    --panel: rgba(10, 15, 22, 0.85);
-    --border: rgba(255, 255, 255, 0.07);
-    --accent: #00e5ff;
-    --text: #e8edf2;
-    --muted: rgba(232, 237, 242, 0.45);
-    --font-display: 'Syne', sans-serif;
-    --font-mono: 'DM Mono', monospace;
-}
-
-html,
-body {
-    width: 100%;
-    height: 100%;
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--font-display);
-    overflow: hidden;
-}
-
+<style scoped>
 #map-container {
     position: fixed;
     inset: 0;
-}
-
-canvas {
-    outline: none;
 }
 
 /* ── Header ─────────────────────────────────── */
@@ -189,7 +176,7 @@ canvas {
     pointer-events: none;
 }
 
-#header .logo {
+.logo {
     font-size: 13px;
     font-weight: 800;
     letter-spacing: 0.22em;
@@ -197,14 +184,14 @@ canvas {
     color: var(--accent);
 }
 
-#header .separator {
+.separator {
     width: 1px;
     height: 18px;
     background: var(--border);
     margin: 0 16px;
 }
 
-#header .subtitle {
+.subtitle {
     font-family: var(--font-mono);
     font-size: 11px;
     color: var(--muted);
@@ -222,20 +209,13 @@ canvas {
     padding: 10px 14px;
     line-height: 1.7;
     backdrop-filter: blur(10px);
-    display: none;
 }
 
-#tooltip .tt-name {
+.tt-name {
     font-weight: 700;
     font-size: 13px;
     color: var(--accent);
     margin-bottom: 2px;
-}
-
-#tooltip .tt-row {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--muted);
 }
 
 /* ── Loading ─────────────────────────────────── */
@@ -279,6 +259,13 @@ canvas {
     background: var(--accent);
     border-radius: 2px;
     transition: width 0.3s ease;
+}
+
+.error-detail {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 12px;
 }
 
 /* ── Stats ─────────────────────────────────── */
