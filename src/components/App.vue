@@ -5,6 +5,12 @@ import type { Feature, FeatureCollection } from 'geojson';
 import { Deck } from '@deck.gl/core';
 import { GeoJsonLayer } from '@deck.gl/layers';
 
+type Populations = {
+  pref_name: string;
+  coordinates: [longitude: number, latitude: number];
+  population: number;
+};
+
 // ─────────────────────────────────────────────
 //  リアクティブな状態
 // ─────────────────────────────────────────────
