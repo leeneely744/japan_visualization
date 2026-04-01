@@ -3,11 +3,12 @@ import { ref, onMounted, onUnmounted } from 'vue';
 import { geojson } from 'flatgeobuf';
 import type { Feature, FeatureCollection } from 'geojson';
 import { Deck } from '@deck.gl/core';
-import { GeoJsonLayer } from '@deck.gl/layers';
+import { GeoJsonLayer, ScatterplotLayer } from '@deck.gl/layers';
+import { population } from '../../public/data/population';
 
-type Populations = {
+type PrefectureData = {
   pref_name: string;
-  coordinates: [longitude: number, latitude: number];
+  coordinates: [latitude: number, longitude: number]; // データは[lat, lon]順
   population: number;
 };
 
@@ -65,9 +66,10 @@ function initDeck(): Deck {
         tooltipVisible.value = false;
         return;
       }
+      // ScatterplotLayer は properties を持たない PrefectureData なので直接参照
+      // GeoJsonLayer は properties オブジェクトを持つ GeoJSON Feature
       const p = object.properties || {};
-      // プロパティ名は FGB の中身に依存するため、あるものを全部表示
-      tooltipName.value = p.N03_001 || p.name || p.pref_name || p.prefecture || Object.values(p)[0] || '—';
+      tooltipName.value = object.pref_name ?? p.N03_001 ?? p.name ?? p.pref_name ?? p.prefecture ?? Object.values(p)[0] ?? '—';
       tooltipX.value = x + 14;
       tooltipY.value = y + 14;
       tooltipVisible.value = true;
@@ -95,6 +97,25 @@ function buildLayer(data: FeatureCollection): GeoJsonLayer {
   });
 }
 
+function buildScatterLayer(data: PrefectureData[]): ScatterplotLayer<PrefectureData> {
+  return new ScatterplotLayer<PrefectureData>({
+    id: 'population-scatter',
+    data,
+    getPosition: d => [d.coordinates[1], d.coordinates[0]], // [lat,lon] → [lon,lat]
+    getRadius: d => d.population * 50,                       // 人口に比例した半径（m）
+    radiusMinPixels: 4,
+    radiusMaxPixels: 80,
+    getFillColor: d => {
+      const t = Math.min(d.population / 6000, 1);
+      return [55 + 200 * t, 100 * (1 - t), 255 * (1 - t), 180];
+    },
+    stroked: true,
+    getLineColor: [255, 255, 255, 40],
+    lineWidthMinPixels: 1,
+    pickable: true,
+  });
+}
+
 let deckgl: Deck | null = null;
 
 onUnmounted(() => {
@@ -111,7 +132,10 @@ onMounted(async () => {
     featureCount.value = data.features.length;
     console.log('[FGB] first feature properties:', data.features[0]?.properties);
 
-    deckgl.setProps({ layers: [buildLayer(data)] });
+    deckgl.setProps({ layers: [
+      buildLayer(data),
+      buildScatterLayer(population as PrefectureData[])
+    ] });
 
     loadingProgress.value = 100;
     setTimeout(() => { loadingHidden.value = true; }, 400);
