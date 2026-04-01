@@ -66,10 +66,11 @@ function initDeck(): Deck {
         tooltipVisible.value = false;
         return;
       }
-      // ScatterplotLayer は properties を持たない PrefectureData なので直接参照
-      // GeoJsonLayer は properties オブジェクトを持つ GeoJSON Feature
-      const p = object.properties || {};
-      tooltipName.value = object.pref_name ?? p.N03_001 ?? p.name ?? p.pref_name ?? p.prefecture ?? Object.values(p)[0] ?? '—';
+      if (!object.pref_name) {
+        tooltipVisible.value = false;
+        return;
+      }
+      tooltipName.value = `${object.pref_name} ${object.population}万人`;
       tooltipX.value = x + 14;
       tooltipY.value = y + 14;
       tooltipVisible.value = true;
