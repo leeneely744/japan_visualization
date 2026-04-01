@@ -4,7 +4,7 @@ import { geojson } from 'flatgeobuf';
 import type { Feature, FeatureCollection } from 'geojson';
 import { Deck } from '@deck.gl/core';
 import { GeoJsonLayer, ScatterplotLayer } from '@deck.gl/layers';
-import { population } from '../../public/data/population';
+import population from '../data/population.json';
 
 type PrefectureData = {
   pref_name: string;
