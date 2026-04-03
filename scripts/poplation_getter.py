@@ -16,9 +16,12 @@ import urllib.request
 import urllib.parse
 import json
 import csv
+import sys
 import time
 from datetime import date
 from env import APP_ID
+
+sys.stdout.reconfigure(encoding="utf-8")
 
 # ─────────────────────────────────────────────
 # 設定
@@ -30,8 +33,8 @@ BASE_URL = "https://api.e-stat.go.jp/rest/3.0/app/json/getStatsData"
 # 国勢調査の改定ごとに統計表IDが変わるため複数指定する
 # ※ 令和2年国勢調査基準 (2015年〜現在)
 STATS_DATA_IDS = [
-    "0003448234",   # 令和2年国勢調査基準：都道府県、男女別人口（2015年〜）
-    "0003412313",   # 平成27年国勢調査基準：都道府県、男女別人口（2010年〜2015年）
+    "0003448230",   # 都道府県、男女別人口（令和2年国勢調査基準）
+    "0003412313",   # 都道府県、男女別人口（平成27年国勢調査基準）
 ]
 
 # 都道府県コード（国土数値情報準拠 01〜47）
