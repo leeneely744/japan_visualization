@@ -1,16 +1,47 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, watch } from 'vue';
 import { geojson } from 'flatgeobuf';
 import type { Feature, FeatureCollection } from 'geojson';
 import { Deck } from '@deck.gl/core';
 import { GeoJsonLayer, ScatterplotLayer } from '@deck.gl/layers';
-import population from '../data/population.json';
+import prefLatLon from '../data/pref_lat_lon.json';
 import prefectures from '../data/prefectures.json';
+import populationCsv from '../data/total_population_2000_2020.csv?raw';
 
 type PrefectureData = {
   pref_code: string;
   coordinates: [latitude: number, longitude: number]; // データは[lat, lon]順
+  population: number; // 万人
 };
+
+// ─────────────────────────────────────────────
+//  CSV パース → Map<pref_code, Map<year, population>>
+// ─────────────────────────────────────────────
+function parsePopulationCsv(csv: string): Map<string, Map<number, number>> {
+  const lines = csv.trim().split('\n');
+  const headers = lines[0].split(',');
+  const years = headers.slice(1).map(Number);
+  const result = new Map<string, Map<number, number>>();
+  for (const line of lines.slice(1)) {
+    const cols = line.split(',');
+    const code = cols[0].trim();
+    const byYear = new Map<number, number>();
+    years.forEach((year, i) => byYear.set(year, parseFloat(cols[i + 1])));
+    result.set(code, byYear);
+  }
+  return result;
+}
+
+const popData = parsePopulationCsv(populationCsv);
+const YEARS = Array.from({ length: 21 }, (_, i) => 2000 + i);
+
+function buildScatterData(year: number): PrefectureData[] {
+  return (prefLatLon as { pref_code: string; coordinates: [number, number] }[]).map(p => ({
+    pref_code: p.pref_code,
+    coordinates: p.coordinates,
+    population: popData.get(p.pref_code)?.get(year) ?? 0,
+  }));
+}
 
 const prefNameByCode = Object.fromEntries(prefectures.map(p => [p.code, p.name]));
 
@@ -21,6 +52,8 @@ const loadingProgress = ref(0);
 const loadingHidden = ref(false);
 const errorMessage = ref('');
 const featureCount = ref(0);
+const selectedYear = ref(2020);
+const tooltipPopulation = ref(0);
 
 const tooltipVisible = ref(false);
 const tooltipX = ref(0);
@@ -64,15 +97,12 @@ function initDeck(): Deck {
     controller: true,
     layers: [],
     onHover: ({ object, x, y }) => {
-      if (!object) {
-        tooltipVisible.value = false;
-        return;
-      }
-      if (!object.pref_code) {
+      if (!object?.pref_code) {
         tooltipVisible.value = false;
         return;
       }
       tooltipName.value = prefNameByCode[object.pref_code] ?? object.pref_code;
+      tooltipPopulation.value = object.population ?? 0;
       tooltipX.value = x + 14;
       tooltipY.value = y + 14;
       tooltipVisible.value = true;
@@ -105,7 +135,7 @@ function buildScatterLayer(data: PrefectureData[]): ScatterplotLayer<PrefectureD
     id: 'population-scatter',
     data,
     getPosition: d => [d.coordinates[1], d.coordinates[0]], // [lat,lon] → [lon,lat]
-    getRadius: 30000,
+    getRadius: d => Math.sqrt(d.population) * 4000, // √万人 × 4km
     radiusMinPixels: 4,
     radiusMaxPixels: 80,
     getFillColor: [0, 229, 255, 160],
@@ -117,6 +147,7 @@ function buildScatterLayer(data: PrefectureData[]): ScatterplotLayer<PrefectureD
 }
 
 let deckgl: Deck | null = null;
+let geoLayer: GeoJsonLayer | null = null;
 
 onUnmounted(() => {
   deckgl?.finalize();
@@ -130,11 +161,11 @@ onMounted(async () => {
     });
 
     featureCount.value = data.features.length;
-    console.log('[FGB] first feature properties:', data.features[0]?.properties);
+    geoLayer = buildLayer(data);
 
     deckgl.setProps({ layers: [
-      buildLayer(data),
-      buildScatterLayer(population as PrefectureData[])
+      geoLayer,
+      buildScatterLayer(buildScatterData(selectedYear.value)),
     ] });
 
     loadingProgress.value = 100;
@@ -143,6 +174,14 @@ onMounted(async () => {
     console.error('[FGB] 読み込みエラー:', err);
     errorMessage.value = (err as Error).message;
   }
+});
+
+watch(selectedYear, (year) => {
+  if (!deckgl || !geoLayer) return;
+  deckgl.setProps({ layers: [
+    geoLayer,
+    buildScatterLayer(buildScatterData(year)),
+  ] });
 });
 </script>
 
@@ -181,6 +220,19 @@ onMounted(async () => {
     </div>
   </div>
 
+  <!-- Year slider -->
+  <div id="year-control">
+    <div class="year-label">{{ selectedYear }}</div>
+    <input
+      type="range"
+      min="2000"
+      max="2020"
+      step="1"
+      v-model.number="selectedYear"
+    />
+    <div class="year-range-labels"><span>2000</span><span>2020</span></div>
+  </div>
+
   <!-- Tooltip -->
   <div
     id="tooltip"
@@ -188,6 +240,7 @@ onMounted(async () => {
     :style="{ left: tooltipX + 'px', top: tooltipY + 'px' }"
   >
     <div class="tt-name">{{ tooltipName }}</div>
+    <div class="tt-pop">{{ tooltipPopulation.toFixed(1) }} 万人</div>
   </div>
 </template>
 
@@ -252,6 +305,52 @@ onMounted(async () => {
     font-size: 13px;
     color: var(--accent);
     margin-bottom: 2px;
+}
+
+.tt-pop {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text);
+}
+
+/* ── Year control ─────────────────────────────── */
+#year-control {
+    position: fixed;
+    bottom: 36px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 20px 8px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    text-align: center;
+    min-width: 200px;
+}
+
+.year-label {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 8px;
+}
+
+#year-control input[type="range"] {
+    width: 100%;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+.year-range-labels {
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 2px;
 }
 
 /* ── Loading ─────────────────────────────────── */
