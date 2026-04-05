@@ -5,12 +5,14 @@ import type { Feature, FeatureCollection } from 'geojson';
 import { Deck } from '@deck.gl/core';
 import { GeoJsonLayer, ScatterplotLayer } from '@deck.gl/layers';
 import population from '../data/population.json';
+import prefectures from '../data/prefectures.json';
 
 type PrefectureData = {
-  pref_name: string;
+  pref_code: string;
   coordinates: [latitude: number, longitude: number]; // データは[lat, lon]順
-  population: number;
 };
+
+const prefNameByCode = Object.fromEntries(prefectures.map(p => [p.code, p.name]));
 
 // ─────────────────────────────────────────────
 //  リアクティブな状態
@@ -66,11 +68,11 @@ function initDeck(): Deck {
         tooltipVisible.value = false;
         return;
       }
-      if (!object.pref_name) {
+      if (!object.pref_code) {
         tooltipVisible.value = false;
         return;
       }
-      tooltipName.value = `${object.pref_name} ${object.population}万人`;
+      tooltipName.value = prefNameByCode[object.pref_code] ?? object.pref_code;
       tooltipX.value = x + 14;
       tooltipY.value = y + 14;
       tooltipVisible.value = true;
@@ -103,13 +105,10 @@ function buildScatterLayer(data: PrefectureData[]): ScatterplotLayer<PrefectureD
     id: 'population-scatter',
     data,
     getPosition: d => [d.coordinates[1], d.coordinates[0]], // [lat,lon] → [lon,lat]
-    getRadius: d => d.population * 50,                       // 人口に比例した半径（m）
+    getRadius: 30000,
     radiusMinPixels: 4,
     radiusMaxPixels: 80,
-    getFillColor: d => {
-      const t = Math.min(d.population / 6000, 1);
-      return [55 + 200 * t, 100 * (1 - t), 255 * (1 - t), 180];
-    },
+    getFillColor: [0, 229, 255, 160],
     stroked: true,
     getLineColor: [255, 255, 255, 40],
     lineWidthMinPixels: 1,
