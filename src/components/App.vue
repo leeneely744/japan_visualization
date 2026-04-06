@@ -33,7 +33,6 @@ function parsePopulationCsv(csv: string): Map<string, Map<number, number>> {
 }
 
 const popData = parsePopulationCsv(populationCsv);
-const YEARS = Array.from({ length: 21 }, (_, i) => 2000 + i);
 
 function buildScatterData(year: number): PrefectureData[] {
   return (prefLatLon as { pref_code: string; coordinates: [number, number] }[]).map(p => ({
@@ -130,12 +129,13 @@ function buildLayer(data: FeatureCollection): GeoJsonLayer {
   });
 }
 
-function buildScatterLayer(data: PrefectureData[]): ScatterplotLayer<PrefectureData> {
+function buildScatterLayer(data: PrefectureData[], year: number): ScatterplotLayer<PrefectureData> {
   return new ScatterplotLayer<PrefectureData>({
     id: 'population-scatter',
     data,
     getPosition: d => [d.coordinates[1], d.coordinates[0]], // [lat,lon] → [lon,lat]
-    getRadius: d => Math.sqrt(d.population) * 4000, // √万人 × 4km
+    getRadius: d => d.population * 100, // √万人 × 4km
+    updateTriggers: { getRadius: year },
     radiusMinPixels: 4,
     radiusMaxPixels: 80,
     getFillColor: [0, 229, 255, 160],
@@ -165,7 +165,7 @@ onMounted(async () => {
 
     deckgl.setProps({ layers: [
       geoLayer,
-      buildScatterLayer(buildScatterData(selectedYear.value)),
+      buildScatterLayer(buildScatterData(selectedYear.value), selectedYear.value),
     ] });
 
     loadingProgress.value = 100;
@@ -178,9 +178,10 @@ onMounted(async () => {
 
 watch(selectedYear, (year) => {
   if (!deckgl || !geoLayer) return;
+  const scatterData = buildScatterData(year);
   deckgl.setProps({ layers: [
     geoLayer,
-    buildScatterLayer(buildScatterData(year)),
+    buildScatterLayer(scatterData, year),
   ] });
 });
 </script>
