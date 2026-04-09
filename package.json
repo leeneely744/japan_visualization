@@ -17,6 +17,7 @@
     "vue-tsc": "^3.2.6"
   },
   "dependencies": {
+    "@deck.gl/aggregation-layers": "9.2.11",
     "@deck.gl/core": "^9.2.11",
     "@deck.gl/layers": "^9.2.11",
     "deck": "^0.0.4",

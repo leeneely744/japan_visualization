@@ -4,6 +4,7 @@ import { geojson } from 'flatgeobuf';
 import type { Feature, FeatureCollection } from 'geojson';
 import { Deck } from '@deck.gl/core';
 import { GeoJsonLayer, ScatterplotLayer } from '@deck.gl/layers';
+import { HeatmapLayer } from '@deck.gl/aggregation-layers';
 import prefLatLon from '../data/pref_lat_lon.json';
 import prefectures from '../data/prefectures.json';
 import populationCsv from '../data/total_population_2000_2020.csv?raw';
@@ -53,6 +54,7 @@ const errorMessage = ref('');
 const featureCount = ref(0);
 const selectedYear = ref(2020);
 const tooltipPopulation = ref(0);
+const layerMode = ref<'scatter' | 'heatmap'>('scatter');
 
 const tooltipVisible = ref(false);
 const tooltipX = ref(0);
@@ -134,7 +136,7 @@ function buildScatterLayer(data: PrefectureData[], year: number): ScatterplotLay
     id: 'population-scatter',
     data,
     getPosition: d => [d.coordinates[1], d.coordinates[0]], // [lat,lon] → [lon,lat]
-    getRadius: d => d.population * 100, // √万人 × 4km
+    getRadius: d => d.population * 100,
     updateTriggers: { getRadius: year },
     radiusMinPixels: 4,
     radiusMaxPixels: 80,
@@ -146,8 +148,38 @@ function buildScatterLayer(data: PrefectureData[], year: number): ScatterplotLay
   });
 }
 
+function buildHeatmapLayer(data: PrefectureData[], year: number): HeatmapLayer<PrefectureData> {
+  return new HeatmapLayer<PrefectureData>({
+    id: 'population-heatmap',
+    data,
+    getPosition: d => [d.coordinates[1], d.coordinates[0]], // [lat,lon] → [lon,lat]
+    getWeight: d => d.population,
+    updateTriggers: { getWeight: year },
+    radiusPixels: 80,
+    intensity: 1,
+    threshold: 0.05,
+    colorRange: [
+      [0, 0, 128, 200],
+      [0, 100, 255, 200],
+      [0, 229, 255, 200],
+      [0, 255, 128, 200],
+      [255, 220, 0, 200],
+      [255, 60, 0, 220],
+    ],
+  });
+}
+
 let deckgl: Deck | null = null;
 let geoLayer: GeoJsonLayer | null = null;
+
+function updateLayers(year: number, mode: 'scatter' | 'heatmap') {
+  if (!deckgl || !geoLayer) return;
+  const data = buildScatterData(year);
+  const popLayer = mode === 'heatmap'
+    ? buildHeatmapLayer(data, year)
+    : buildScatterLayer(data, year);
+  deckgl.setProps({ layers: [geoLayer, popLayer] });
+}
 
 onUnmounted(() => {
   deckgl?.finalize();
@@ -162,11 +194,7 @@ onMounted(async () => {
 
     featureCount.value = data.features.length;
     geoLayer = buildLayer(data);
-
-    deckgl.setProps({ layers: [
-      geoLayer,
-      buildScatterLayer(buildScatterData(selectedYear.value), selectedYear.value),
-    ] });
+    updateLayers(selectedYear.value, layerMode.value);
 
     loadingProgress.value = 100;
     setTimeout(() => { loadingHidden.value = true; }, 400);
@@ -176,13 +204,8 @@ onMounted(async () => {
   }
 });
 
-watch(selectedYear, (year) => {
-  if (!deckgl || !geoLayer) return;
-  const scatterData = buildScatterData(year);
-  deckgl.setProps({ layers: [
-    geoLayer,
-    buildScatterLayer(scatterData, year),
-  ] });
+watch([selectedYear, layerMode], ([year, mode]) => {
+  updateLayers(year, mode as 'scatter' | 'heatmap');
 });
 </script>
 
@@ -232,6 +255,18 @@ watch(selectedYear, (year) => {
       v-model.number="selectedYear"
     />
     <div class="year-range-labels"><span>2000</span><span>2020</span></div>
+  </div>
+
+  <!-- Layer toggle -->
+  <div id="layer-toggle">
+    <button
+      :class="{ active: layerMode === 'scatter' }"
+      @click="layerMode = 'scatter'"
+    >散布図</button>
+    <button
+      :class="{ active: layerMode === 'heatmap' }"
+      @click="layerMode = 'heatmap'"
+    >ヒートマップ</button>
   </div>
 
   <!-- Tooltip -->
@@ -443,5 +478,40 @@ watch(selectedYear, (year) => {
     font-weight: 400;
     color: var(--muted);
     margin-left: 4px;
+}
+
+/* ── Layer toggle ────────────────────────────── */
+#layer-toggle {
+    position: fixed;
+    top: 70px;
+    right: 20px;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+#layer-toggle button {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    cursor: pointer;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    transition: color 0.2s, border-color 0.2s;
+}
+
+#layer-toggle button.active {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+#layer-toggle button:hover:not(.active) {
+    color: var(--text);
 }
 </style>
